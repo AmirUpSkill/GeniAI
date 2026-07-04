@@ -1,5 +1,7 @@
 .env
 .venv/
+node_modules/
+frontend/node_modules/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -8,5 +10,6 @@ __pycache__/
 .coverage
 htmlcov/
 dist/
+frontend/dist/
 build/
 *.egg-info/

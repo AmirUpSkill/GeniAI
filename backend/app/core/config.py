@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 AppEnv = Literal["local", "test", "development", "production"]
+CookieSameSite = Literal["lax", "strict", "none"]
 
 
 class Settings(BaseSettings):
@@ -26,6 +27,25 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://geni:geni_password@localhost:5432/geni",
         alias="DATABASE_URL",
     )
+
+    # --- Auth ---
+    google_client_id: str = Field(default="local-google-client-id", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(
+        default="local-google-client-secret",
+        alias="GOOGLE_CLIENT_SECRET",
+    )
+    google_redirect_uri: str = Field(
+        default="http://localhost:8000/api/auth/google/callback",
+        alias="GOOGLE_REDIRECT_URI",
+    )
+    frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
+
+    # --- Session Cookie ---
+    session_cookie_name: str = Field(default="geni_session", alias="SESSION_COOKIE_NAME")
+    session_secret_key: str = Field(default="change-me-in-production", alias="SESSION_SECRET_KEY")
+    session_ttl_days: int = Field(default=7, alias="SESSION_TTL_DAYS")
+    session_cookie_secure: bool = Field(default=False, alias="SESSION_COOKIE_SECURE")
+    session_cookie_samesite: CookieSameSite = Field(default="lax", alias="SESSION_COOKIE_SAMESITE")
 
     model_config = SettingsConfigDict(
         env_file=("../.env", ".env"),

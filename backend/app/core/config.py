@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Any
 from typing import Literal
 
 from pydantic import Field
@@ -32,6 +33,9 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    def __init__(self, **values: Any) -> None:
+        super().__init__(**values)
 
 
 @lru_cache

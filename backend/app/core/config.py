@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         default="http://localhost:8000/api/auth/google/callback",
         alias="GOOGLE_REDIRECT_URI",
     )
-    frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
+    frontend_url: str = Field(default="http://localhost:5173", alias="FRONTEND_URL")
 
     # --- AI Provider ---
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")

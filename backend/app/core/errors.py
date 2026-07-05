@@ -34,6 +34,18 @@ class AuthProviderError(AppError):
     message = "Google authentication failed."
 
 
+class ChatSessionNotFoundError(AppError):
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "CHAT_SESSION_NOT_FOUND"
+    message = "Chat session was not found."
+
+
+class AIProviderError(AppError):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "AI_PROVIDER_FAILED"
+    message = "AI provider request failed."
+
+
 def app_error_response(error: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,

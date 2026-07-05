@@ -11,6 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.auth_session import AuthSession
+    from app.models.chat_session import ChatSession
 
 
 class User(Base):
@@ -39,6 +40,10 @@ class User(Base):
     )
 
     auth_sessions: Mapped[list[AuthSession]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

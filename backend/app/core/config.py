@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     )
     frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
 
+    # --- AI Provider ---
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-3.1-flash-lite", alias="GEMINI_MODEL")
+
     # --- Session Cookie ---
     session_cookie_name: str = Field(default="geni_session", alias="SESSION_COOKIE_NAME")
     session_secret_key: str = Field(default="change-me-in-production", alias="SESSION_SECRET_KEY")

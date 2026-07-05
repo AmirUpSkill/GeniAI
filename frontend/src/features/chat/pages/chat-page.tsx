@@ -15,8 +15,8 @@ import type { FormEvent } from 'react'
 import { getCurrentUser } from '../../auth/api'
 import type { AuthenticatedUser } from '../../auth/schemas'
 import {
-  createChatMessage,
   createChatSession,
+  createChatTurn,
   deleteChatSession,
   listChatMessages,
   listChatSessions,
@@ -151,8 +151,12 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
         setActiveSessionId(chatSession.id)
       }
 
-      const message = await createChatMessage(chatSessionId, content)
-      setMessages((currentMessages) => [...currentMessages, message])
+      const turn = await createChatTurn(chatSessionId, content)
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        turn.userMessage,
+        turn.assistantMessage,
+      ])
       setComposerValue('')
       await refreshSessions(chatSessionId)
     } catch {

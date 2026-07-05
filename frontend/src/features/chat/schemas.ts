@@ -41,5 +41,13 @@ export const chatDeleteResponseSchema = z.object({
   message: z.string(),
 })
 
+export const chatTurnResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({
+    userMessage: chatMessageSchema,
+    assistantMessage: chatMessageSchema,
+  }),
+})
+
 export type ChatMessage = z.infer<typeof chatMessageSchema>
 export type ChatSession = z.infer<typeof chatSessionSchema>

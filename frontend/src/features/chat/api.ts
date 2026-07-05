@@ -5,6 +5,7 @@ import {
   chatMessageResponseSchema,
   chatSessionListResponseSchema,
   chatSessionResponseSchema,
+  chatTurnResponseSchema,
   type ChatMessage,
   type ChatSession,
 } from './schemas'
@@ -54,4 +55,15 @@ export async function createChatMessage(
     method: 'POST',
   })
   return chatMessageResponseSchema.parse(response).data
+}
+
+export async function createChatTurn(
+  chatSessionId: string,
+  content: string,
+): Promise<{ assistantMessage: ChatMessage; userMessage: ChatMessage }> {
+  const response = await apiClient(`/api/chat/sessions/${chatSessionId}/turns`, {
+    body: { content },
+    method: 'POST',
+  })
+  return chatTurnResponseSchema.parse(response).data
 }

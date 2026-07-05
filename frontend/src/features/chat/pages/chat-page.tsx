@@ -1,6 +1,9 @@
 import {
   Check,
+  CircleDashed,
+  Edit3,
   Loader2,
+  MessageCircle,
   MessageSquareText,
   MoreVertical,
   Pencil,
@@ -10,7 +13,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { getCurrentUser } from '../../auth/api'
 import type { AuthenticatedUser } from '../../auth/schemas'
@@ -40,14 +43,10 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [sessionsState, setSessionsState] = useState<LoadingState>('loading')
   const [messagesState, setMessagesState] = useState<LoadingState>('idle')
   const [error, setError] = useState<string | null>(null)
-
-  const activeSession = useMemo(
-    () => sessions.find((session) => session.id === activeSessionId) ?? null,
-    [activeSessionId, sessions],
-  )
 
   useEffect(() => {
     let isMounted = true
@@ -225,23 +224,52 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   }
 
   const isBusy = sessionsState === 'saving' || messagesState === 'saving'
+  const hasMessages = messages.length > 0
 
   return (
-    <main className="chat-page">
-      <aside className="chat-sidebar" aria-label="Chat sidebar">
-        <div className="chat-sidebar-header">
-          <div className="brand-lockup" aria-label="Geni">
-            <div className="brand-mark">G</div>
-            <span>Geni</span>
+    <main className={`chat-page${isHistoryOpen ? ' has-history-open' : ''}`}>
+      <aside className="chat-rail" aria-label="Primary chat navigation">
+        <div className="rail-top">
+          <div className="rail-logo" aria-label="Geni">
+            G
           </div>
           <button
-            aria-label="Create new chat"
-            className="icon-button"
+            aria-label="New chat"
+            className="rail-button"
             disabled={sessionsState === 'saving'}
             onClick={handleCreateSession}
             type="button"
           >
-            <Plus aria-hidden="true" size={18} />
+            <Edit3 aria-hidden="true" size={21} />
+          </button>
+          <button
+            aria-label="Toggle chat history"
+            className={`rail-button${isHistoryOpen ? ' is-active' : ''}`}
+            onClick={() => setIsHistoryOpen((currentValue) => !currentValue)}
+            type="button"
+          >
+            <MessageCircle aria-hidden="true" size={22} />
+          </button>
+        </div>
+
+        <button
+          aria-label="Open profile"
+          className="rail-profile"
+          onClick={() => onNavigate(paths.profile)}
+          type="button"
+        >
+          {user?.avatarUrl ? <img src={user.avatarUrl} alt="" /> : <span>{getInitials(user)}</span>}
+        </button>
+      </aside>
+
+      <aside className="history-drawer" aria-label="Chat history" aria-hidden={!isHistoryOpen}>
+        <div className="history-drawer-header">
+          <div>
+            <p>Geni</p>
+            <strong>Chat history</strong>
+          </div>
+          <button aria-label="Close history" onClick={() => setIsHistoryOpen(false)} type="button">
+            <X aria-hidden="true" size={18} />
           </button>
         </div>
 
@@ -305,6 +333,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
                       onClick={() => {
                         setActiveSessionId(session.id)
                         setOpenMenuSessionId(null)
+                        setIsHistoryOpen(false)
                       }}
                       type="button"
                     >
@@ -342,46 +371,16 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
             ))}
           </div>
         </nav>
-
-        <button
-          className="sidebar-profile-button"
-          onClick={() => onNavigate(paths.profile)}
-          type="button"
-        >
-          <span className="sidebar-avatar">
-            {user?.avatarUrl ? (
-              <img src={user.avatarUrl} alt="" />
-            ) : (
-              <UserRound aria-hidden="true" size={18} />
-            )}
-          </span>
-          <span>
-            <strong>{user?.fullName ?? 'Profile'}</strong>
-            <small>{user?.email ?? 'View account'}</small>
-          </span>
-        </button>
       </aside>
 
-      <section className="chat-workspace" aria-labelledby="chat-title">
-        <header className="chat-topbar">
-          <div>
-            <p className="profile-label">AI chat</p>
-            <h1 id="chat-title">{activeSession?.title ?? 'New conversation'}</h1>
-          </div>
-          <button
-            className="secondary-action"
-            disabled={sessionsState === 'saving'}
-            onClick={handleCreateSession}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={17} />
-            <span>New chat</span>
-          </button>
+      <section className={`chat-workspace${hasMessages ? ' has-messages' : ''}`} aria-labelledby="chat-title">
+        <header className="chat-floating-status">
+          <CircleDashed aria-hidden="true" size={22} />
         </header>
 
         {error ? <p className="chat-error">{error}</p> : null}
 
-        <div className="message-panel" aria-live="polite">
+        <div className={`message-panel${hasMessages ? ' has-messages' : ''}`} aria-live="polite">
           {messagesState === 'loading' ? (
             <div className="message-loading" role="status">
               <Loader2 aria-hidden="true" className="button-spinner" size={18} />
@@ -390,13 +389,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
           ) : null}
 
           {messagesState !== 'loading' && messages.length === 0 ? (
-            <div className="empty-chat">
-              <div className="empty-chat-icon">
-                <MessageSquareText aria-hidden="true" size={28} />
-              </div>
-              <h2>Start with a prompt</h2>
-              <p>Messages you send are saved to this chat history.</p>
-            </div>
+            <div className="empty-chat" id="chat-title" />
           ) : null}
 
           {messages.length > 0 ? (
@@ -414,6 +407,15 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
         </div>
 
         <form className="composer" onSubmit={handleSendMessage}>
+          <button
+            aria-label="Create a new chat"
+            className="composer-tool"
+            disabled={sessionsState === 'saving'}
+            onClick={handleCreateSession}
+            type="button"
+          >
+            <Plus aria-hidden="true" size={25} />
+          </button>
           <textarea
             aria-label="Message"
             onChange={(event) => setComposerValue(event.target.value)}
@@ -427,13 +429,17 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
             rows={1}
             value={composerValue}
           />
-          <button disabled={isBusy || composerValue.trim().length === 0} type="submit">
+          <button
+            aria-label="Send message"
+            className="composer-submit"
+            disabled={isBusy || composerValue.trim().length === 0}
+            type="submit"
+          >
             {messagesState === 'saving' ? (
               <Loader2 aria-hidden="true" className="button-spinner" size={18} />
             ) : (
-              <Send aria-hidden="true" size={18} />
+              <Send aria-hidden="true" size={20} />
             )}
-            <span>Send</span>
           </button>
         </form>
       </section>
@@ -457,4 +463,17 @@ function formatTime(value: string) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function getInitials(user: AuthenticatedUser | null) {
+  if (user === null) {
+    return <UserRound aria-hidden="true" size={18} />
+  }
+
+  return user.fullName
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
 }

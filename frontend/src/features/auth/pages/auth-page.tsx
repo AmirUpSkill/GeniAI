@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
-import { getGoogleLoginUrl } from '../api'
+import { getCurrentUser, getGoogleLoginUrl } from '../api'
 import { GoogleLoginButton } from '../components/google-login-button'
+import { paths } from '../../../lib/paths'
 
 type Theme = 'dark' | 'light'
 
@@ -11,6 +12,24 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null)
 
   const isDark = theme === 'dark'
+
+  useEffect(() => {
+    let isMounted = true
+
+    getCurrentUser()
+      .then(() => {
+        if (isMounted) {
+          window.location.assign(paths.chat)
+        }
+      })
+      .catch(() => {
+        // Staying on the auth page is expected when there is no session yet.
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   function handleGoogleLogin() {
     try {

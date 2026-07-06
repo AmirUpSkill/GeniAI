@@ -513,7 +513,6 @@ button {
 .history-menu > button:focus-visible,
 .history-menu-popover button:focus-visible,
 .history-select:focus-visible,
-.composer textarea:focus-visible,
 .history-edit input:focus-visible,
 .composer button:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.42);
@@ -918,9 +917,11 @@ button {
   resize: none;
   border: 0;
   outline: 0;
+  appearance: none;
   padding: 10px 6px;
   line-height: 1.45;
   color: #f1f1f1;
+  background: transparent;
 }
 
 .composer textarea::placeholder {

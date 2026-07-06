@@ -37,8 +37,9 @@ def test_logout_deletes_session_and_clears_cookie(app: FastAPI) -> None:
     app.dependency_overrides[get_settings] = override_settings
     app.dependency_overrides[get_auth_service] = override_auth_service
     client = TestClient(app)
+    client.cookies.set("geni_session", "raw-session-token")
 
-    response = client.post("/api/auth/logout", cookies={"geni_session": "raw-session-token"})
+    response = client.post("/api/auth/logout")
 
     assert response.status_code == 200
     assert response.json() == {

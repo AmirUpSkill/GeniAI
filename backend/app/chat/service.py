@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from app.ai.provider import AIProvider, AIReply, FileCitation
 from app.chat.repository import ChatRepository
 from app.chat.schemas import ChatMessageCreate, ChatSessionCreate, ChatSessionUpdate, ChatTurnCreate
-from app.core.errors import ChatSessionNotFoundError
+from app.core.errors import AIProviderError, ChatSessionNotFoundError
+from app.file_search.models import FileSearchDocument
+from app.file_search.service import FileSearchService
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
 from app.models.user import User
-from app.file_search.service import FileSearchService
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class PreparedAITurn:
     chat_session: ChatSession
     user_message: ChatMessage
     messages: list[ChatMessage]
-    document: object | None
+    document: FileSearchDocument | None
 
 
 @dataclass(frozen=True)
@@ -175,8 +176,6 @@ class ChatService:
 
             text = "".join(text_parts).strip()
             if not text:
-                from app.core.errors import AIProviderError
-
                 raise AIProviderError("AI provider returned an empty response.")
             assistant_message = await self._save_assistant_reply(
                 turn,

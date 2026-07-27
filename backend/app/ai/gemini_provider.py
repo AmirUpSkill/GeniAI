@@ -170,7 +170,7 @@ def build_prompt(messages: list[ChatMessage]) -> str:
     return (
         "The following transcript contains recent conversation context. Respond to "
         "the latest user message.\n\n"
-        f"{transcript}"
+        f"{transcript}\n\nASSISTANT:"
     )
 
 
@@ -186,5 +186,5 @@ def build_file_search_prompt(messages: list[ChatMessage]) -> str:
     return (
         "Use File Search to answer the latest user message from the indexed "
         "document. The preceding messages are conversation context only.\n\n"
-        f"{transcript}"
+        f"{transcript}\n\nASSISTANT:"
     )

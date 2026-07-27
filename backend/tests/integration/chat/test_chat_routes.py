@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from datetime import UTC, datetime
+import json
 
 import pytest
 from fastapi import FastAPI
@@ -7,6 +8,11 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.chat.dependencies import get_chat_service
+from app.chat.service import (
+    ChatTextDelta,
+    ChatTurnCompleted,
+    PreparedAITurn,
+)
 from app.core.errors import ChatSessionNotFoundError
 from app.main import create_app
 from app.models.chat_message import ChatMessage
@@ -101,6 +107,29 @@ class FakeChatService:
         self.message.content = getattr(payload, "content")
         return self.message, self.assistant_message
 
+    async def prepare_ai_turn(
+        self,
+        current_user: User,
+        chat_session_id: str,
+        payload: object,
+    ) -> PreparedAITurn:
+        _ = current_user
+        if chat_session_id != self.chat_session.id:
+            raise ChatSessionNotFoundError()
+        self.message.content = getattr(payload, "content")
+        return PreparedAITurn(
+            chat_session=self.chat_session,
+            user_message=self.message,
+            messages=[self.message],
+            document=None,
+        )
+
+    async def stream_ai_turn(self, turn: PreparedAITurn):
+        _ = turn
+        yield ChatTextDelta(text="Hello ")
+        yield ChatTextDelta(text="from Gemini")
+        yield ChatTurnCompleted(assistant_message=self.assistant_message)
+
 
 def build_user() -> User:
     return User(
@@ -185,6 +214,29 @@ def test_create_chat_turn_returns_user_and_assistant_messages(app: FastAPI) -> N
     assert payload["userMessage"]["content"] == "Hello Gemini"
     assert payload["assistantMessage"]["role"] == "assistant"
     assert payload["assistantMessage"]["content"] == "Hello from Gemini"
+
+
+def test_stream_chat_turn_returns_ordered_ndjson_events(app: FastAPI) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/chat/sessions/chat_123/turns/stream",
+        json={"content": "Hello Gemini"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == [
+        "turn.started",
+        "text.delta",
+        "text.delta",
+        "turn.completed",
+    ]
+    assert events[1]["delta"] == "Hello "
+    assert events[-1]["assistantMessage"]["content"] == "Hello from Gemini"
 
 
 def test_delete_chat_session(app: FastAPI) -> None:

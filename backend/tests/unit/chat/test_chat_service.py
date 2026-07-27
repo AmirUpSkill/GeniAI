@@ -3,7 +3,7 @@ from typing import cast
 
 import pytest
 
-from app.ai.provider import AIProvider
+from app.ai.provider import AIProvider, AIStreamChunk
 from app.chat.repository import ChatRepository
 from app.chat.schemas import ChatMessageCreate, ChatSessionCreate, ChatSessionUpdate, ChatTurnCreate
 from app.chat.service import ChatService
@@ -16,9 +16,22 @@ from app.models.user import User
 class FakeSession:
     def __init__(self) -> None:
         self.committed = False
+        self.commit_count = 0
+        self.rolled_back = False
 
     async def commit(self) -> None:
         self.committed = True
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+    async def refresh(
+        self,
+        instance: object,
+        attribute_names: list[str] | None = None,
+    ) -> None:
+        _ = (instance, attribute_names)
 
 
 class FakeChatRepository:
@@ -86,9 +99,22 @@ class FakeChatRepository:
 
 
 class FakeAIProvider:
-    async def generate_reply(self, messages: list[ChatMessage]) -> str:
-        _ = messages
+    async def generate_reply(
+        self,
+        messages: list[ChatMessage],
+        file_search_store_name: str | None = None,
+    ) -> str:
+        _ = (messages, file_search_store_name)
         return "AI reply"
+
+    async def stream_reply(
+        self,
+        messages: list[ChatMessage],
+        file_search_store_name: str | None = None,
+    ):
+        _ = (messages, file_search_store_name)
+        yield AIStreamChunk(text="AI ")
+        yield AIStreamChunk(text="reply")
 
 
 def build_user() -> User:
@@ -190,3 +216,53 @@ async def test_create_ai_turn_saves_user_and_assistant_messages() -> None:
     assert assistant_message.role == "assistant"
     assert assistant_message.content == "AI reply"
     assert repository.session.committed is True
+    assert repository.session.commit_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_ai_turn_commits_only_completed_assistant() -> None:
+    repository = FakeChatRepository(chat_session=build_chat_session())
+    service = build_service(repository)
+    turn = await service.prepare_ai_turn(
+        build_user(),
+        "chat_123",
+        ChatTurnCreate(content="Stream this"),
+    )
+
+    events = [event async for event in service.stream_ai_turn(turn)]
+
+    assert [getattr(event, "text", None) for event in events[:2]] == ["AI ", "reply"]
+    assert events[-1].assistant_message.content == "AI reply"
+    assert [message.role for message in repository.messages] == ["user", "assistant"]
+    assert repository.session.commit_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_ai_turn_failure_keeps_only_committed_user_message() -> None:
+    class FailingAIProvider(FakeAIProvider):
+        async def stream_reply(
+            self,
+            messages: list[ChatMessage],
+            file_search_store_name: str | None = None,
+        ):
+            _ = (messages, file_search_store_name)
+            yield AIStreamChunk(text="partial")
+            raise RuntimeError("provider failed")
+
+    repository = FakeChatRepository(chat_session=build_chat_session())
+    service = ChatService(
+        cast(ChatRepository, repository),
+        cast(AIProvider, FailingAIProvider()),
+    )
+    turn = await service.prepare_ai_turn(
+        build_user(),
+        "chat_123",
+        ChatTurnCreate(content="Stream this"),
+    )
+
+    with pytest.raises(RuntimeError):
+        _ = [event async for event in service.stream_ai_turn(turn)]
+
+    assert [message.role for message in repository.messages] == ["user"]
+    assert repository.session.commit_count == 1
+    assert repository.session.rolled_back is True

@@ -7,7 +7,6 @@ import {
   MessageSquareText,
   MoreVertical,
   Pencil,
-  Plus,
   Send,
   Trash2,
   UserRound,
@@ -27,6 +26,14 @@ import {
 } from '../api'
 import type { ChatMessage, ChatSession } from '../schemas'
 import { paths } from '../../../lib/paths'
+import {
+  DocumentAttachmentButton,
+  DocumentStatusCard,
+  FileSearchDropOverlay,
+} from '../../file-search/components/document-attachment'
+import { CitationDialog } from '../../file-search/components/citation-dialog'
+import { useFileSearchDocument } from '../../file-search/use-file-search-document'
+import type { FileSearchCitation } from '../../file-search/schemas'
 
 type ChatPageProps = {
   onNavigate: (path: string) => void
@@ -47,6 +54,9 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   const [sessionsState, setSessionsState] = useState<LoadingState>('loading')
   const [messagesState, setMessagesState] = useState<LoadingState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [isDraggingDocument, setIsDraggingDocument] = useState(false)
+  const [selectedCitation, setSelectedCitation] = useState<FileSearchCitation | null>(null)
+  const fileSearch = useFileSearchDocument(activeSessionId)
 
   useEffect(() => {
     let isMounted = true
@@ -165,6 +175,44 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
     }
   }
 
+  async function handleDocumentSelected(file: File) {
+    setError(null)
+
+    try {
+      let chatSessionId = activeSessionId
+      if (chatSessionId === null) {
+        const chatSession = await createChatSession(createTitleFromFile(file.name))
+        chatSessionId = chatSession.id
+        setSessions((currentSessions) => [chatSession, ...currentSessions])
+        setActiveSessionId(chatSession.id)
+        setMessages([])
+      }
+      await fileSearch.upload(file, chatSessionId)
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error ? caughtError.message : 'Unable to upload this PDF.',
+      )
+    }
+  }
+
+  async function handleRemoveDocument() {
+    if (
+      fileSearch.document?.status === 'ready' &&
+      !window.confirm(
+        'Remove this document? Future answers in this chat will no longer use it.',
+      )
+    ) {
+      return
+    }
+    try {
+      await fileSearch.remove()
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error ? caughtError.message : 'Unable to remove this document.',
+      )
+    }
+  }
+
   function startEditing(session: ChatSession) {
     setEditingSessionId(session.id)
     setEditingTitle(session.title)
@@ -224,10 +272,37 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   }
 
   const isBusy = sessionsState === 'saving' || messagesState === 'saving'
+  const isDocumentProcessing =
+    fileSearch.document?.status === 'pending' || fileSearch.document?.status === 'indexing'
   const hasMessages = messages.length > 0
 
   return (
-    <main className={`chat-page${isHistoryOpen ? ' has-history-open' : ''}`}>
+    <main
+      className={`chat-page${isHistoryOpen ? ' has-history-open' : ''}`}
+      onDragEnter={(event) => {
+        if (event.dataTransfer.types.includes('Files') && fileSearch.document === null) {
+          event.preventDefault()
+          setIsDraggingDocument(true)
+        }
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files') && fileSearch.document === null) {
+          event.preventDefault()
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setIsDraggingDocument(false)
+        if (fileSearch.document !== null) {
+          return
+        }
+        const file = event.dataTransfer.files[0]
+        if (file !== undefined) {
+          void handleDocumentSelected(file)
+        }
+      }}
+    >
+      {isDraggingDocument ? <FileSearchDropOverlay /> : null}
       <aside className="chat-rail" aria-label="Primary chat navigation">
         <div className="rail-top">
           <div className="rail-logo" aria-label="Geni">
@@ -331,9 +406,10 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
                     <button
                       className="history-select"
                       onClick={() => {
-                        setActiveSessionId(session.id)
+                      setActiveSessionId(session.id)
                         setOpenMenuSessionId(null)
                         setIsHistoryOpen(false)
+                        setSelectedCitation(null)
                       }}
                       type="button"
                     >
@@ -398,6 +474,24 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
                 <article className={`message-row is-${message.role}`} key={message.id}>
                   <div className="message-bubble">
                     <p>{message.content}</p>
+                    {message.citations.length > 0 ? (
+                      <div className="message-citations" aria-label="Answer sources">
+                        {message.citations.map((citation) => (
+                          <button
+                            key={citation.id}
+                            onClick={() => setSelectedCitation(citation)}
+                            type="button"
+                          >
+                            <span>Source {citation.position}</span>
+                            <small>
+                              {citation.pageNumber === null
+                                ? citation.fileName
+                                : `${citation.fileName} · Page ${citation.pageNumber}`}
+                            </small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
                   </div>
                 </article>
@@ -406,49 +500,75 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
           ) : null}
         </div>
 
-        <form className="composer" onSubmit={handleSendMessage}>
-          <button
-            aria-label="Create a new chat"
-            className="composer-tool"
-            disabled={sessionsState === 'saving'}
-            onClick={handleCreateSession}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={25} />
-          </button>
-          <textarea
-            aria-label="Message"
-            onChange={(event) => setComposerValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-            placeholder="Ask Geni anything..."
-            rows={1}
-            value={composerValue}
+        <div
+          className="composer-stack"
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setIsDraggingDocument(false)
+            }
+          }}
+        >
+          <DocumentStatusCard
+            document={fileSearch.document}
+            error={fileSearch.error}
+            isLoading={fileSearch.isLoading}
+            onRemove={() => void handleRemoveDocument()}
           />
-          <button
-            aria-label="Send message"
-            className="composer-submit"
-            disabled={isBusy || composerValue.trim().length === 0}
-            type="submit"
-          >
-            {messagesState === 'saving' ? (
-              <Loader2 aria-hidden="true" className="button-spinner" size={18} />
-            ) : (
-              <Send aria-hidden="true" size={20} />
-            )}
-          </button>
-        </form>
+          <form className="composer" onSubmit={handleSendMessage}>
+            <DocumentAttachmentButton
+              disabled={sessionsState === 'saving' || fileSearch.isLoading}
+              document={fileSearch.document}
+              onSelect={(file) => void handleDocumentSelected(file)}
+            />
+            <textarea
+              aria-label="Message"
+              onChange={(event) => setComposerValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+              placeholder={
+                isDocumentProcessing
+                  ? 'Preparing your document…'
+                  : fileSearch.document?.status === 'ready'
+                    ? 'Ask a question about your document…'
+                    : 'Ask Geni anything...'
+              }
+              rows={1}
+              value={composerValue}
+            />
+            <button
+              aria-label="Send message"
+              className="composer-submit"
+              disabled={isBusy || isDocumentProcessing || composerValue.trim().length === 0}
+              type="submit"
+            >
+              {messagesState === 'saving' ? (
+                <Loader2 aria-hidden="true" className="button-spinner" size={18} />
+              ) : (
+                <Send aria-hidden="true" size={20} />
+              )}
+            </button>
+          </form>
+        </div>
       </section>
+      <CitationDialog
+        citation={selectedCitation}
+        onClose={() => setSelectedCitation(null)}
+      />
     </main>
   )
 }
 
 function createTitleFromMessage(content: string) {
   return content.length > 48 ? `${content.slice(0, 45)}...` : content
+}
+
+function createTitleFromFile(fileName: string) {
+  const title = `Chat with ${fileName}`
+  return title.length > 48 ? `${title.slice(0, 45)}...` : title
 }
 
 function formatDate(value: string) {

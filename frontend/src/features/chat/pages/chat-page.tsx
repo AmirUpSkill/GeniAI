@@ -8,20 +8,21 @@ import {
   MoreVertical,
   Pencil,
   Send,
+  Square,
   Trash2,
   UserRound,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { getCurrentUser } from '../../auth/api'
 import type { AuthenticatedUser } from '../../auth/schemas'
 import {
   createChatSession,
-  createChatTurn,
   deleteChatSession,
   listChatMessages,
   listChatSessions,
+  streamChatTurn,
   updateChatSessionTitle,
 } from '../api'
 import type { ChatMessage, ChatSession } from '../schemas'
@@ -40,12 +41,14 @@ type ChatPageProps = {
 }
 
 type LoadingState = 'idle' | 'loading' | 'saving'
+type DeliveryState = 'streaming' | 'interrupted'
+type UIChatMessage = ChatMessage & { deliveryState?: DeliveryState }
 
 export function ChatPage({ onNavigate }: ChatPageProps) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<UIChatMessage[]>([])
   const [composerValue, setComposerValue] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -56,7 +59,18 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [isDraggingDocument, setIsDraggingDocument] = useState(false)
   const [selectedCitation, setSelectedCitation] = useState<FileSearchCitation | null>(null)
+  const streamControllerRef = useRef<AbortController | null>(null)
   const fileSearch = useFileSearchDocument(activeSessionId)
+
+  function abortActiveStream() {
+    streamControllerRef.current?.abort()
+  }
+
+  useEffect(() => {
+    return () => {
+      streamControllerRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     let isMounted = true
@@ -125,6 +139,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   }, [activeSessionId])
 
   async function handleCreateSession() {
+    abortActiveStream()
     setSessionsState('saving')
     setError(null)
 
@@ -149,6 +164,10 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
     }
 
     let chatSessionId = activeSessionId
+    if (streamControllerRef.current !== null) {
+      return
+    }
+
     setMessagesState('saving')
     setError(null)
 
@@ -160,17 +179,81 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
         setActiveSessionId(chatSession.id)
       }
 
-      const turn = await createChatTurn(chatSessionId, content)
+      const createdAt = new Date().toISOString()
+      const optimisticUserId = `optimistic-user-${crypto.randomUUID()}`
+      const streamingAssistantId = `streaming-assistant-${crypto.randomUUID()}`
+      const optimisticUserMessage: UIChatMessage = {
+        id: optimisticUserId,
+        chatSessionId,
+        role: 'user',
+        content,
+        citations: [],
+        createdAt,
+      }
+      const streamingAssistantMessage: UIChatMessage = {
+        id: streamingAssistantId,
+        chatSessionId,
+        role: 'assistant',
+        content: '',
+        citations: [],
+        createdAt,
+        deliveryState: 'streaming',
+      }
       setMessages((currentMessages) => [
         ...currentMessages,
-        turn.userMessage,
-        turn.assistantMessage,
+        optimisticUserMessage,
+        streamingAssistantMessage,
       ])
       setComposerValue('')
-      await refreshSessions(chatSessionId)
+      const controller = new AbortController()
+      streamControllerRef.current = controller
+      let streamError: string | null = null
+
+      await streamChatTurn(chatSessionId, content, {
+        signal: controller.signal,
+        onEvent: (streamEvent) => {
+          if (streamEvent.type === 'turn.started') {
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === optimisticUserId ? streamEvent.userMessage : message,
+              ),
+            )
+          } else if (streamEvent.type === 'text.delta') {
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === streamingAssistantId
+                  ? { ...message, content: message.content + streamEvent.delta }
+                  : message,
+              ),
+            )
+          } else if (streamEvent.type === 'turn.completed') {
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === streamingAssistantId
+                  ? streamEvent.assistantMessage
+                  : message,
+              ),
+            )
+          } else {
+            streamError = streamEvent.error.message
+            setMessages((currentMessages) =>
+              markMessageInterrupted(currentMessages, streamingAssistantId),
+            )
+          }
+        },
+      })
+      if (streamError !== null) {
+        setError(streamError)
+      } else {
+        await refreshSessions(chatSessionId)
+      }
     } catch {
-      setError('Unable to save this message.')
+      setMessages((currentMessages) => markStreamingMessagesInterrupted(currentMessages))
+      if (!streamControllerRef.current?.signal.aborted) {
+        setError('The answer was interrupted. Please try again.')
+      }
     } finally {
+      streamControllerRef.current = null
       setMessagesState('idle')
     }
   }
@@ -245,6 +328,9 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   }
 
   async function handleDeleteSession(chatSessionId: string) {
+    if (chatSessionId === activeSessionId) {
+      abortActiveStream()
+    }
     setSessionsState('saving')
     setError(null)
     setOpenMenuSessionId(null)
@@ -280,7 +366,11 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
     <main
       className={`chat-page${isHistoryOpen ? ' has-history-open' : ''}`}
       onDragEnter={(event) => {
-        if (event.dataTransfer.types.includes('Files') && fileSearch.document === null) {
+        if (
+          messagesState !== 'saving' &&
+          event.dataTransfer.types.includes('Files') &&
+          fileSearch.document === null
+        ) {
           event.preventDefault()
           setIsDraggingDocument(true)
         }
@@ -293,7 +383,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
       onDrop={(event) => {
         event.preventDefault()
         setIsDraggingDocument(false)
-        if (fileSearch.document !== null) {
+        if (messagesState === 'saving' || fileSearch.document !== null) {
           return
         }
         const file = event.dataTransfer.files[0]
@@ -330,7 +420,10 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
         <button
           aria-label="Open profile"
           className="rail-profile"
-          onClick={() => onNavigate(paths.profile)}
+          onClick={() => {
+            abortActiveStream()
+            onNavigate(paths.profile)
+          }}
           type="button"
         >
           {user?.avatarUrl ? <img src={user.avatarUrl} alt="" /> : <span>{getInitials(user)}</span>}
@@ -406,7 +499,8 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
                     <button
                       className="history-select"
                       onClick={() => {
-                      setActiveSessionId(session.id)
+                        abortActiveStream()
+                        setActiveSessionId(session.id)
                         setOpenMenuSessionId(null)
                         setIsHistoryOpen(false)
                         setSelectedCitation(null)
@@ -473,7 +567,12 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
               {messages.map((message) => (
                 <article className={`message-row is-${message.role}`} key={message.id}>
                   <div className="message-bubble">
-                    <p>{message.content}</p>
+                    <p>
+                      {message.content}
+                      {message.deliveryState === 'streaming' ? (
+                        <span aria-label="Generating" className="streaming-cursor" />
+                      ) : null}
+                    </p>
                     {message.citations.length > 0 ? (
                       <div className="message-citations" aria-label="Answer sources">
                         {message.citations.map((citation) => (
@@ -492,6 +591,9 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
                         ))}
                       </div>
                     ) : null}
+                    {message.deliveryState === 'interrupted' ? (
+                      <span className="message-delivery-state">Interrupted</span>
+                    ) : null}
                     <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
                   </div>
                 </article>
@@ -509,6 +611,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
           }}
         >
           <DocumentStatusCard
+            disabled={messagesState === 'saving'}
             document={fileSearch.document}
             error={fileSearch.error}
             isLoading={fileSearch.isLoading}
@@ -516,7 +619,11 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
           />
           <form className="composer" onSubmit={handleSendMessage}>
             <DocumentAttachmentButton
-              disabled={sessionsState === 'saving' || fileSearch.isLoading}
+              disabled={
+                sessionsState === 'saving' ||
+                messagesState === 'saving' ||
+                fileSearch.isLoading
+              }
               document={fileSearch.document}
               onSelect={(file) => void handleDocumentSelected(file)}
             />
@@ -540,13 +647,24 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
               value={composerValue}
             />
             <button
-              aria-label="Send message"
+              aria-label={messagesState === 'saving' ? 'Stop generating' : 'Send message'}
               className="composer-submit"
-              disabled={isBusy || isDocumentProcessing || composerValue.trim().length === 0}
-              type="submit"
+              disabled={
+                messagesState !== 'saving' &&
+                (isBusy || isDocumentProcessing || composerValue.trim().length === 0)
+              }
+              onClick={
+                messagesState === 'saving'
+                  ? (event) => {
+                      event.preventDefault()
+                      abortActiveStream()
+                    }
+                  : undefined
+              }
+              type={messagesState === 'saving' ? 'button' : 'submit'}
             >
               {messagesState === 'saving' ? (
-                <Loader2 aria-hidden="true" className="button-spinner" size={18} />
+                <Square aria-hidden="true" fill="currentColor" size={15} />
               ) : (
                 <Send aria-hidden="true" size={20} />
               )}
@@ -564,6 +682,27 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
 
 function createTitleFromMessage(content: string) {
   return content.length > 48 ? `${content.slice(0, 45)}...` : content
+}
+
+function markMessageInterrupted(
+  messages: UIChatMessage[],
+  messageId: string,
+): UIChatMessage[] {
+  return messages.map((message) =>
+    message.id === messageId
+      ? { ...message, deliveryState: 'interrupted' }
+      : message,
+  )
+}
+
+function markStreamingMessagesInterrupted(
+  messages: UIChatMessage[],
+): UIChatMessage[] {
+  return messages.map((message) =>
+    message.deliveryState === 'streaming'
+      ? { ...message, deliveryState: 'interrupted' }
+      : message,
+  )
 }
 
 function createTitleFromFile(fileName: string) {

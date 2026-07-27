@@ -891,6 +891,24 @@ button {
   font-size: 12px;
 }
 
+.streaming-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: -0.14em;
+  background: currentColor;
+  animation: stream-cursor-pulse 900ms steps(2, jump-none) infinite;
+}
+
+.message-delivery-state {
+  display: block;
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .message-row.is-user .message-bubble time {
   color: var(--text-dim);
 }
@@ -1260,6 +1278,12 @@ button {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes stream-cursor-pulse {
+  50% {
+    opacity: 0.2;
   }
 }
 

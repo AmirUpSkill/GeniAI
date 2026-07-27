@@ -51,5 +51,28 @@ export const chatTurnResponseSchema = z.object({
   }),
 })
 
+export const chatTurnStreamEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('turn.started'),
+    userMessage: chatMessageSchema,
+  }),
+  z.object({
+    type: z.literal('text.delta'),
+    delta: z.string(),
+  }),
+  z.object({
+    type: z.literal('turn.completed'),
+    assistantMessage: chatMessageSchema,
+  }),
+  z.object({
+    type: z.literal('turn.error'),
+    error: z.object({
+      code: z.string(),
+      message: z.string(),
+    }),
+  }),
+])
+
 export type ChatMessage = z.infer<typeof chatMessageSchema>
 export type ChatSession = z.infer<typeof chatSessionSchema>
+export type ChatTurnStreamEvent = z.infer<typeof chatTurnStreamEventSchema>

@@ -49,6 +49,7 @@ export function DocumentAttachmentButton({
 
 type DocumentStatusCardProps = {
   document: FileSearchDocument | null
+  disabled?: boolean
   error?: string | null
   isLoading?: boolean
   onRemove: () => void
@@ -56,6 +57,7 @@ type DocumentStatusCardProps = {
 
 export function DocumentStatusCard({
   document,
+  disabled = false,
   error,
   isLoading = false,
   onRemove,
@@ -83,9 +85,15 @@ export function DocumentStatusCard({
           <span className="file-search-size">{formatFileSize(document.sizeBytes)}</span>
           <button
             aria-label={`Remove ${document.originalName}`}
-            disabled={isProcessing}
+            disabled={isProcessing || disabled}
             onClick={onRemove}
-            title={isProcessing ? 'Wait for indexing to finish' : 'Remove document'}
+            title={
+              disabled
+                ? 'Wait for the answer to finish'
+                : isProcessing
+                  ? 'Wait for indexing to finish'
+                  : 'Remove document'
+            }
             type="button"
           >
             <Trash2 aria-hidden="true" size={16} />

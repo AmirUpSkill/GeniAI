@@ -1,6 +1,10 @@
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
 
 from app.auth.dependencies import get_current_user
 from app.chat.dependencies import get_chat_service
@@ -19,7 +23,8 @@ from app.chat.schemas import (
     ChatTurnData,
     ChatTurnResponse,
 )
-from app.chat.service import ChatService
+from app.chat.service import ChatService, ChatTextDelta, ChatTurnCompleted
+from app.core.errors import AIProviderError, AppError
 from app.models.user import User
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -133,3 +138,84 @@ async def create_chat_turn(
             assistant_message=ChatMessageRead.model_validate(assistant_message),
         )
     )
+
+
+@router.post("/sessions/{chat_session_id}/turns/stream")
+async def stream_chat_turn(
+    chat_session_id: str,
+    payload: ChatTurnCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+) -> StreamingResponse:
+    turn = await chat_service.prepare_ai_turn(
+        current_user,
+        chat_session_id,
+        payload,
+    )
+
+    async def generate_events() -> AsyncIterator[bytes]:
+        yield encode_ndjson(
+            {
+                "type": "turn.started",
+                "userMessage": serialize_message(turn.user_message),
+            }
+        )
+        try:
+            async for event in chat_service.stream_ai_turn(turn):
+                if isinstance(event, ChatTextDelta):
+                    yield encode_ndjson(
+                        {
+                            "type": "text.delta",
+                            "delta": event.text,
+                        }
+                    )
+                elif isinstance(event, ChatTurnCompleted):
+                    yield encode_ndjson(
+                        {
+                            "type": "turn.completed",
+                            "assistantMessage": serialize_message(event.assistant_message),
+                        }
+                    )
+        except asyncio.CancelledError:
+            raise
+        except AppError as exc:
+            yield encode_ndjson(
+                {
+                    "type": "turn.error",
+                    "error": {
+                        "code": exc.detail.code,
+                        "message": exc.detail.message,
+                    },
+                }
+            )
+        except Exception:
+            error = AIProviderError()
+            yield encode_ndjson(
+                {
+                    "type": "turn.error",
+                    "error": {
+                        "code": error.detail.code,
+                        "message": error.detail.message,
+                    },
+                }
+            )
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def serialize_message(message: object) -> dict[str, object]:
+    return ChatMessageRead.model_validate(message).model_dump(
+        mode="json",
+        by_alias=True,
+    )
+
+
+def encode_ndjson(payload: dict[str, object]) -> bytes:
+    return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")

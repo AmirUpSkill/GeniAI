@@ -1,4 +1,7 @@
-from app.ai.provider import AIProvider, AIReply
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+
+from app.ai.provider import AIProvider, AIReply, FileCitation
 from app.chat.repository import ChatRepository
 from app.chat.schemas import ChatMessageCreate, ChatSessionCreate, ChatSessionUpdate, ChatTurnCreate
 from app.core.errors import ChatSessionNotFoundError
@@ -6,6 +9,24 @@ from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
 from app.models.user import User
 from app.file_search.service import FileSearchService
+
+
+@dataclass(frozen=True)
+class PreparedAITurn:
+    chat_session: ChatSession
+    user_message: ChatMessage
+    messages: list[ChatMessage]
+    document: object | None
+
+
+@dataclass(frozen=True)
+class ChatTextDelta:
+    text: str
+
+
+@dataclass(frozen=True)
+class ChatTurnCompleted:
+    assistant_message: ChatMessage
 
 
 class ChatService:
@@ -83,12 +104,36 @@ class ChatService:
         chat_session_id: str,
         payload: ChatTurnCreate,
     ) -> tuple[ChatMessage, ChatMessage]:
+        turn = await self.prepare_ai_turn(current_user, chat_session_id, payload)
+        document = turn.document
+        reply = await self.ai_provider.generate_reply(
+            turn.messages,
+            getattr(document, "gemini_store_name", None),
+        )
+        # A small compatibility bridge keeps custom providers simple while the
+        # application moves from string replies to evidence-bearing AIReply values.
+        if isinstance(reply, str):
+            reply = AIReply(text=reply)
+        assistant_message = await self._save_assistant_reply(
+            turn,
+            reply.text,
+            reply.citations,
+        )
+        return turn.user_message, assistant_message
+
+    async def prepare_ai_turn(
+        self,
+        current_user: User,
+        chat_session_id: str,
+        payload: ChatTurnCreate,
+    ) -> PreparedAITurn:
         chat_session = await self.get_session(current_user, chat_session_id)
         user_message = await self.repository.create_chat_message(
             chat_session,
             "user",
             payload.content,
         )
+        await self.repository.session.commit()
         messages = await self.repository.list_chat_messages(chat_session.id)
         document = None
         if self.file_search_service is not None:
@@ -96,28 +141,73 @@ class ChatService:
                 current_user,
                 chat_session.id,
             )
-        reply = await self.ai_provider.generate_reply(
-            messages,
-            document.gemini_store_name if document is not None else None,
+        return PreparedAITurn(
+            chat_session=chat_session,
+            user_message=user_message,
+            messages=messages,
+            document=document,
         )
-        # A small compatibility bridge keeps custom providers simple while the
-        # application moves from string replies to evidence-bearing AIReply values.
-        if isinstance(reply, str):
-            reply = AIReply(text=reply)
+
+    async def stream_ai_turn(
+        self,
+        turn: PreparedAITurn,
+    ) -> AsyncIterator[ChatTextDelta | ChatTurnCompleted]:
+        text_parts: list[str] = []
+        citations: list[FileCitation] = []
+        citation_keys: set[tuple[str | None, int | None, str]] = set()
+        try:
+            async for chunk in self.ai_provider.stream_reply(
+                turn.messages,
+                getattr(turn.document, "gemini_store_name", None),
+            ):
+                if chunk.text:
+                    text_parts.append(chunk.text)
+                    yield ChatTextDelta(text=chunk.text)
+                for citation in chunk.citations:
+                    key = (
+                        citation.file_name,
+                        citation.page_number,
+                        " ".join(citation.source_excerpt.split()),
+                    )
+                    if key not in citation_keys:
+                        citation_keys.add(key)
+                        citations.append(citation)
+
+            text = "".join(text_parts).strip()
+            if not text:
+                from app.core.errors import AIProviderError
+
+                raise AIProviderError("AI provider returned an empty response.")
+            assistant_message = await self._save_assistant_reply(
+                turn,
+                text,
+                citations,
+            )
+            yield ChatTurnCompleted(assistant_message=assistant_message)
+        except BaseException:
+            await self.repository.session.rollback()
+            raise
+
+    async def _save_assistant_reply(
+        self,
+        turn: PreparedAITurn,
+        text: str,
+        citations: list[FileCitation],
+    ) -> ChatMessage:
         assistant_message = await self.repository.create_chat_message(
-            chat_session,
+            turn.chat_session,
             "assistant",
-            reply.text,
+            text,
         )
-        if self.file_search_service is not None and document is not None:
+        if self.file_search_service is not None and turn.document is not None:
             await self.file_search_service.save_citations(
                 assistant_message,
-                document,
-                reply.citations,
+                turn.document,
+                citations,
             )
         await self.repository.session.commit()
         await self.repository.session.refresh(
             assistant_message,
             attribute_names=["file_search_citations"],
         )
-        return user_message, assistant_message
+        return assistant_message

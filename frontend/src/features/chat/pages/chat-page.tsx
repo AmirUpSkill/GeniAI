@@ -1,6 +1,5 @@
 import {
   Check,
-  CircleDashed,
   Edit3,
   Loader2,
   MessageCircle,
@@ -35,6 +34,7 @@ import {
 import { CitationDialog } from '../../file-search/components/citation-dialog'
 import { useFileSearchDocument } from '../../file-search/use-file-search-document'
 import type { FileSearchCitation } from '../../file-search/schemas'
+import { AssistantMarkdown } from '../components/assistant-markdown'
 
 type ChatPageProps = {
   onNavigate: (path: string) => void
@@ -60,7 +60,45 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   const [isDraggingDocument, setIsDraggingDocument] = useState(false)
   const [selectedCitation, setSelectedCitation] = useState<FileSearchCitation | null>(null)
   const streamControllerRef = useRef<AbortController | null>(null)
+  const pendingDeltaRef = useRef<{ messageId: string; text: string } | null>(null)
+  const deltaFrameRef = useRef<number | null>(null)
   const fileSearch = useFileSearchDocument(activeSessionId)
+
+  function flushPendingDelta() {
+    const pending = pendingDeltaRef.current
+    pendingDeltaRef.current = null
+    deltaFrameRef.current = null
+    if (pending === null) {
+      return
+    }
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === pending.messageId
+          ? { ...message, content: message.content + pending.text }
+          : message,
+      ),
+    )
+  }
+
+  function queueTextDelta(messageId: string, delta: string) {
+    if (pendingDeltaRef.current?.messageId === messageId) {
+      pendingDeltaRef.current.text += delta
+    } else {
+      flushPendingDelta()
+      pendingDeltaRef.current = { messageId, text: delta }
+    }
+    if (deltaFrameRef.current === null) {
+      deltaFrameRef.current = window.requestAnimationFrame(flushPendingDelta)
+    }
+  }
+
+  function discardPendingDelta() {
+    pendingDeltaRef.current = null
+    if (deltaFrameRef.current !== null) {
+      window.cancelAnimationFrame(deltaFrameRef.current)
+      deltaFrameRef.current = null
+    }
+  }
 
   function abortActiveStream() {
     streamControllerRef.current?.abort()
@@ -69,6 +107,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
   useEffect(() => {
     return () => {
       streamControllerRef.current?.abort()
+      discardPendingDelta()
     }
   }, [])
 
@@ -219,14 +258,9 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
               ),
             )
           } else if (streamEvent.type === 'text.delta') {
-            setMessages((currentMessages) =>
-              currentMessages.map((message) =>
-                message.id === streamingAssistantId
-                  ? { ...message, content: message.content + streamEvent.delta }
-                  : message,
-              ),
-            )
+            queueTextDelta(streamingAssistantId, streamEvent.delta)
           } else if (streamEvent.type === 'turn.completed') {
+            discardPendingDelta()
             setMessages((currentMessages) =>
               currentMessages.map((message) =>
                 message.id === streamingAssistantId
@@ -236,6 +270,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
             )
           } else {
             streamError = streamEvent.error.message
+            flushPendingDelta()
             setMessages((currentMessages) =>
               markMessageInterrupted(currentMessages, streamingAssistantId),
             )
@@ -248,6 +283,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
         await refreshSessions(chatSessionId)
       }
     } catch {
+      flushPendingDelta()
       setMessages((currentMessages) => markStreamingMessagesInterrupted(currentMessages))
       if (!streamControllerRef.current?.signal.aborted) {
         setError('The answer was interrupted. Please try again.')
@@ -396,7 +432,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
       <aside className="chat-rail" aria-label="Primary chat navigation">
         <div className="rail-top">
           <div className="rail-logo" aria-label="Geni">
-            G
+            <img alt="" src="/geni.svg" />
           </div>
           <button
             aria-label="New chat"
@@ -545,7 +581,7 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
 
       <section className={`chat-workspace${hasMessages ? ' has-messages' : ''}`} aria-labelledby="chat-title">
         <header className="chat-floating-status">
-          <CircleDashed aria-hidden="true" size={22} />
+          <img alt="Geni" src="/geni.svg" />
         </header>
 
         {error ? <p className="chat-error">{error}</p> : null}
@@ -567,12 +603,14 @@ export function ChatPage({ onNavigate }: ChatPageProps) {
               {messages.map((message) => (
                 <article className={`message-row is-${message.role}`} key={message.id}>
                   <div className="message-bubble">
-                    <p>
-                      {message.content}
-                      {message.deliveryState === 'streaming' ? (
-                        <span aria-label="Generating" className="streaming-cursor" />
-                      ) : null}
-                    </p>
+                    {message.role === 'assistant' ? (
+                      <AssistantMarkdown
+                        content={message.content}
+                        isStreaming={message.deliveryState === 'streaming'}
+                      />
+                    ) : (
+                      <p>{message.content}</p>
+                    )}
                     {message.citations.length > 0 ? (
                       <div className="message-citations" aria-label="Answer sources">
                         {message.citations.map((citation) => (

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.file_search.models import FileSearchCitation
     from app.models.chat_session import ChatSession
 
 
@@ -42,3 +43,9 @@ class ChatMessage(Base):
     )
 
     chat_session: Mapped[ChatSession] = relationship(back_populates="messages")
+    file_search_citations: Mapped[list[FileSearchCitation]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="FileSearchCitation.position",
+        lazy="selectin",
+    )

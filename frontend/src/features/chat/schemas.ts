@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { fileSearchCitationSchema } from '../file-search/schemas'
 
 export const chatSessionSchema = z.object({
   id: z.string(),
@@ -23,6 +24,7 @@ export const chatMessageSchema = z.object({
   chatSessionId: z.string(),
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
+  citations: z.array(fileSearchCitationSchema).default([]),
   createdAt: z.string(),
 })
 

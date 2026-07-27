@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.file_search.schemas import FileSearchCitationRead
+
 MessageRole = Literal["user", "assistant", "system"]
 
 
@@ -46,6 +48,10 @@ class ChatMessageRead(BaseModel):
     chat_session_id: str = Field(serialization_alias="chatSessionId")
     role: MessageRole
     content: str
+    file_search_citations: list[FileSearchCitationRead] = Field(
+        default_factory=list,
+        serialization_alias="citations",
+    )
     created_at: datetime = Field(serialization_alias="createdAt")
 
 

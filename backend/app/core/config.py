@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     # --- AI Provider ---
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.1-flash-lite", alias="GEMINI_MODEL")
+    file_search_embedding_model: str = Field(
+        default="models/gemini-embedding-2",
+        alias="FILE_SEARCH_EMBEDDING_MODEL",
+    )
+    file_search_generation_model: str = Field(
+        default="gemini-3.6-flash",
+        alias="FILE_SEARCH_GENERATION_MODEL",
+    )
+    file_search_max_file_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        alias="FILE_SEARCH_MAX_FILE_BYTES",
+    )
+    file_search_poll_seconds: float = Field(
+        default=2.0,
+        alias="FILE_SEARCH_POLL_SECONDS",
+    )
 
     # --- Session Cookie ---
     session_cookie_name: str = Field(default="geni_session", alias="SESSION_COOKIE_NAME")

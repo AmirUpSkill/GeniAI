@@ -46,6 +46,36 @@ class AIProviderError(AppError):
     message = "AI provider request failed."
 
 
+class FileSearchDocumentNotFoundError(AppError):
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "FILE_SEARCH_DOCUMENT_NOT_FOUND"
+    message = "The chat does not have an indexed document."
+
+
+class FileSearchDocumentConflictError(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "FILE_SEARCH_DOCUMENT_EXISTS"
+    message = "This chat already has a document. Remove it before uploading another."
+
+
+class FileSearchDocumentNotReadyError(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "FILE_SEARCH_DOCUMENT_NOT_READY"
+    message = "The document is still being prepared. Try again when indexing is complete."
+
+
+class FileSearchUploadError(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "FILE_SEARCH_UPLOAD_INVALID"
+    message = "The uploaded document is not supported."
+
+
+class FileSearchProviderError(AppError):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "FILE_SEARCH_PROVIDER_FAILED"
+    message = "Gemini could not process the document."
+
+
 def app_error_response(error: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,

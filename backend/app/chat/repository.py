@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
@@ -74,6 +75,7 @@ class ChatRepository:
     async def list_chat_messages(self, chat_session_id: str) -> list[ChatMessage]:
         result = await self.session.execute(
             select(ChatMessage)
+            .options(selectinload(ChatMessage.file_search_citations))
             .where(ChatMessage.chat_session_id == chat_session_id)
             .order_by(ChatMessage.created_at.asc())
         )

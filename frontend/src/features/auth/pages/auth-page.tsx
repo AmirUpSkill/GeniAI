@@ -51,7 +51,9 @@ export function AuthPage() {
       <section className="auth-shell" aria-label="Sign in to Geni">
         <div className="auth-header">
           <div className="brand-lockup" aria-label="Geni">
-            <div className="brand-mark">G</div>
+            <div className="brand-mark">
+              <img alt="" src="/geni.svg" />
+            </div>
             <span>Geni</span>
           </div>
 

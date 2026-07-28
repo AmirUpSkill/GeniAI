@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from app.models.chat_message import ChatMessage
@@ -25,9 +26,24 @@ class AIReply:
     citations: list[FileCitation] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class AIStreamChunk:
+    """
+        Provider-neutral incremental output from an AI generation.
+    """
+    text: str = ""
+    citations: list[FileCitation] = field(default_factory=list)
+
+
 class AIProvider(Protocol):
     async def generate_reply(
         self,
         messages: list[ChatMessage],
         file_search_store_name: str | None = None,
     ) -> AIReply: ...
+
+    def stream_reply(
+        self,
+        messages: list[ChatMessage],
+        file_search_store_name: str | None = None,
+    ) -> AsyncIterator[AIStreamChunk]: ...
